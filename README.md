@@ -1,29 +1,34 @@
 # Dependency Chain Completeness Validator
 
+It is a W.I.P. tool for validating state machine-like dependency chains.
+Each state system consists of starting and terminating states, internal states, transitions between them and conditions, which govern what transitions and state can be achieved.
+Each state can have an internal state system that can set higher order conditions and the termination of an internal system is itself a condition that can be checked.
+
+I'm at this point unsure if it is worth making the distinction between conditions and already achieved states; probably the only difference between them will be in the ease of use and conceptual separation.
+Once difference that can be semantically meaningful is that state must be active to influence what transitions can be taken, while a condition can be set at earlier states and checked/changed later.
 
 ## Implementation todos
 
-- [ ] Possible starting and terminating conditions
-
+- [ ] Possible starting and terminating states
 Each state (except above) must declare:
-- [ ] what conditions must be met to achieve it
+- [ ] what conditions must be met to enable transitioning to it (not applicable to starting states)
+- [ ] what conditions must be met to advance to another state and if that advancement is reversible / two-way (having a separation between outgoing and ingoing conditions should lower the complexity on the user end) (not applicable to terminating states)
 - [ ] what conditions can be/are fulfilled while in it (having achieved this state is also another potential condition)
-- [ ] what conditions must be met to advance to another state and if that advancement is reversible / two-way 
 - [ ] what other states can occur at the same time (must be mutually declared)
-- [ ] what states are exclusive to each other (might be achieved by having one state be a negative condition of another, but explicit mutual exclusivity is preferable)
-- [ ] if any of the conditions or out-coming states are mutually exclusive
+- [ ] what states are exclusive to each other (might be achieved by having one state be a negative condition of transitioning to another, but explicit mutual exclusivity is preferable)
+- [ ] if any of the conditions or outgoing states are mutually exclusive (should only be needed if mutually active states are a default, but I'm not sure at this point)
 -  ...
-- [ ] state systems can be recursive within a given state:
-    - [ ] internal termination states are also conditions
-    - [ ] within internal states it is possible higher level conditions 
+- [ ] state can have another state system inside, where:
+    - [ ] internal termination states are also conditions, which can be checked on a higher level
+    - [ ] within internal states it is possible to interact with higher level conditions 
 
-- incompatibility of conditions must be declared 
+Incompatibility of conditions must be declared.
+Should the scope of all conditions and states be global, or should there be name spacing for recursive systems?
 
 Checker must validate that:
 - [ ] each state and state transition is achievable 
 - [ ] no two incompatible states/conditions can be achieved at the same time / in sequence 
 States and conditions might have an only one way temporal incompatibility 
-
 (There might be a distinction between states that are incompatible in tandem and in general)
 
 Output:
