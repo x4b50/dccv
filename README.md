@@ -9,12 +9,14 @@ Once difference that can be semantically meaningful is that state must be active
 
 ## Implementation todos
 
+- [ ] parse and validate the most baisc, conditionless system
+
 - [ ] Possible starting and terminating states
 Each state (except above) must declare:
 - [ ] what conditions must be met to enable transitioning to it (not applicable to starting states)
 - [ ] what conditions must be met to advance to another state and if that advancement is reversible / two-way (having a separation between outgoing and ingoing conditions should lower the complexity on the user end) (not applicable to terminating states)
 - [ ] what conditions can be/are fulfilled while in it (having achieved this state is also another potential condition)
-- [ ] what other states can occur at the same time (must be mutually declared)
+- [ ] what other states can occur at the same time (must be mutually declared) (should there be something like that?)
 - [ ] what states are exclusive to each other (might be achieved by having one state be a negative condition of transitioning to another, but explicit mutual exclusivity is preferable)
 - [ ] if any of the conditions or outgoing states are mutually exclusive (should only be needed if mutually active states are a default, but I'm not sure at this point)
 -  ...
