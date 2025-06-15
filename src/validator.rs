@@ -3,23 +3,11 @@
 // TODO: for much later: if you have a lot of vectors, etc. use custom allocators
 #[derive(PartialEq, Debug)]
 struct State {
-    requirements: Vec<Condition>,
+    // requirements: Vec<Condition>,
     // how to encode what conditions are set outright, what are achievable and what are mutually exclusive?
-    conditions: Vec<Condition>,
-    // How to represent the state? references, indexes, names, hashes, ...?
+    // conditions: Vec<Condition>,
     transitions: Vec<(StateIndexer, Vec<Condition>)>,
     // TODO: something with what other states are exclusive to this one
-}
-
-
-impl State {
-    fn new() -> State {
-        State {
-            requirements:vec![],
-            conditions:vec![],
-            transitions: vec![],
-        }
-    }
 }
 
 // TODO: change to static &str
@@ -36,6 +24,16 @@ struct Condition;
 struct StateIndexer { v: usize }
 // TODO: backpatching indexes while parsing states will be an issue
 
+impl States {
+    fn new() -> States {
+        States {states: vec![]}
+    }
+
+    fn push(&mut self, state: State) {
+        self.states.push(state);
+    }
+}
+
 use std::ops::Index;
 impl Index<StateIndexer> for States {
     type Output = State;
@@ -45,18 +43,46 @@ impl Index<StateIndexer> for States {
 }
 
 use std::collections::HashMap;
-use std::marker::PhantomData;
-#[allow(dead_code)]
-struct Table<T> {
-    phantom: PhantomData<T>,
+#[derive(Debug, PartialEq)]
+pub struct Table {
     // TODO: change to str
-    index: HashMap<String, usize>,
-    name: Vec<String>
+    indexes: HashMap<String, usize>,
+    names: Vec<String>
 }
 
 // to ensure proper handling such that output of hashmap is an index to the vec
-impl<T> Table<T> {
+impl Table {
+    fn new() -> Self {
+        Table {
+            indexes: HashMap::new(),
+            names: vec![],
+        }
+    }
 
+    fn try_insert(&mut self, v: String) -> Result<(), usize> {
+        if self.indexes.contains_key(&v) {return Err(self.indexes[&v])}
+        self.indexes.insert(v.clone(), self.names.len());
+        self.names.push(v);
+        Ok(())
+    }
+
+    fn has_name(&self, v: &str) -> bool {
+        self.indexes.contains_key(v)
+    }
+
+    fn has_index(&self, i: usize) -> bool {
+        i < self.names.len()
+    }
+
+    fn at(&self, i: usize) -> &str {
+        if i >= self.names.len() {panic!("index out of bounds")}
+        &self.names[i]
+    }
+
+    fn index_of(&self, v: &str) -> usize {
+        if !self.has_name(v) {panic!("no value: '{v}' in Table")}
+        self.indexes[v]
+    }
 }
 
 // TODO: during parsing each state and condition identifier should be first gathered in a list of
@@ -67,7 +93,6 @@ impl<T> Table<T> {
 
 pub mod parser {
     use crate::validator::*;
-    use std::any::TypeId;
 
     macro_rules! cvec {
         ($v:tt) => {
@@ -84,22 +109,52 @@ pub mod parser {
     }
 
     // tmp empty, should return why there was an error
-    pub fn parse_config(input_path: &str) -> Result<States, ()> {
+    // TODO: vector of error enums, maybe with positions or something like that
+    // then the caller can decide to print error messages
+    pub fn parse_config(input_path: &str) -> Result<(States, Table), ()> {
         let contents = match std::fs::read_to_string(input_path) {
-            // Ok(c) => c.chars().collect::<Vec<char>>().into_iter().peekable(),
             Ok(c) => cvec!(c),
             Err(e) => {eprintln!("{e}"); return Err(());}
         };
 
+        let mut state_names = Table::new();
+        let (starting_states, states, termination_states);
+
         match parse_states(&contents) {
-            Ok((offset, (starting_states, states, termination_states))) => {
-                todo!("backpatch all the state names")
+            Ok((_offset, (sts_s, sts, sts_t))) => {
+                (starting_states, states, termination_states) = (sts_s, sts, sts_t);
+                for state in starting_states.iter().chain(states.iter()).chain(termination_states.iter()) {
+                    match state_names.try_insert(String::from_iter(state.name.iter())) {
+                        Ok(()) => (),
+                        Err(i) => {
+                            eprintln!("redefiniton of state: {}", state_names.at(i));
+                            return Err(())
+                        }
+                    }
+                }
             }
             Err(_) => return Err(())
         }
 
-        // tables should be constructed here, after collecting all states and conditions we can
-        // just backpatch them
+        let mut states_patched = States::new();
+        // backpatch the transition names in StateInt to indexes in State
+        for state in starting_states.iter().chain(states.iter()) {
+            let mut transitions = vec![];
+            for tr in &state.transitions {
+                let name = String::from_iter(tr.iter());
+                if state_names.has_name(&name) {
+                    transitions.push((
+                            StateIndexer {v:state_names.index_of(&name)},
+                            vec![]));
+                } else {
+                    eprintln!("undefined state: {}", name);
+                    return Err(())
+                }
+            }
+            states_patched.push(State {transitions});
+        }
+
+        Ok((states_patched, state_names))
     }
 
     fn advance_comment(contents: &[char]) -> usize {
@@ -127,7 +182,7 @@ pub mod parser {
                 'S' if contents[i..].starts_with(&cvec!("Start")) => {
                     i += 5;
                     match parse_list(&contents[i..], ListElements::Starting) {
-                        Ok((offset, mut list)) => {
+                        Ok((offset, list)) => {
                             i += offset;
                             start_states.append(&mut list.into_iter().map(|x| match x {
                                 ListTypes::StateInt(s) => s,
@@ -142,7 +197,7 @@ pub mod parser {
                 'T' if contents[i..].starts_with(&cvec!("Termination")) => {
                     i += 11;
                     match parse_list(&contents[i..], ListElements::Terminating) {
-                        Ok((offset, mut list)) => {
+                        Ok((offset, list)) => {
                             i += offset;
                             termination_states.append(&mut list.into_iter().map(|x| match x {
                                 ListTypes::StateInt(s) => s,
