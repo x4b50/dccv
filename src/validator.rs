@@ -94,36 +94,47 @@ pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
     let goal = states.states.len();
     let mut count = 0;
     let mut achieved = vec![false; goal];
+    let mut checked = vec![false; goal];
     let mut unachievable = vec![];
 
-    'l: for (i, state) in states.states.iter().enumerate() {
-        match state {
-            State::Start{transitions} => {
-                achieved[i] = true; count += 1;
-                for (idx, _) in transitions {
-
-                    if !achieved[idx.v] {
-                        achieved[idx.v] = true;
-                        count += 1;
-                        if count == goal {break 'l}
+    // used to check if no new paths have been discovered
+    let mut prev_count = 0;
+    'l: loop {
+        for (i, state) in states.states.iter().enumerate() {
+            match state {
+                State::Start{transitions} => if !checked[i] {
+                    checked[i] = true; achieved[i] = true; count += 1;
+                    for (idx, _) in transitions {
+                        if !achieved[idx.v] {
+                            achieved[idx.v] = true;
+                            count += 1;
+                            if count == goal {break 'l}
+                        }
                     }
-                }
-            },
-            State::Base{transitions} => for (idx, _) in transitions {
-                // first check if this state can be achieved
-                // might have to loop over the states multiple times if you allow for out of order definitions
-                if !achieved[i] {unachievable.push(i); continue}
-                if !achieved[idx.v] {
-                    achieved[idx.v] = true;
-                    count += 1;
-                    if count == goal {break 'l}
-                }
-            },
-            State::Termination{} => if !achieved[i] {unachievable.push(i)}
+                },
+                State::Base{transitions} => if !checked[i] {
+                    checked[i] = true;
+                    for (idx, _) in transitions {
+                        if !achieved[i] {unachievable.push(i); continue}
+                        if !achieved[idx.v] {
+                            achieved[idx.v] = true;
+                            count += 1;
+                            if count == goal {break 'l}
+                        }
+                    }
+                },
+                State::Termination{} => if !achieved[i] {unachievable.push(i)}
+            }
         }
+        if count == prev_count {break}
+        prev_count = count;
     }
 
-    if unachievable.len() > 0 {return Err(unachievable)}
+    if unachievable.len() > 0 {
+        let mut updated = vec![];
+        for idx in unachievable {if !achieved[idx] {updated.push(idx)}}
+        if updated.len() > 0 {return Err(updated)}
+    }
     if count < goal {panic!("Not all states are achievable, yet we didn't find the unachievable ones")}
     Ok(())
 }

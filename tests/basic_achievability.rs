@@ -19,3 +19,12 @@ fn test_states_unachievable() {
     assert_ne!(unachievable, Ok(()), "unachievable states should have been found");
     assert_eq!(unachievable, Err(vec![2]), "wrong state found unachievable")
 }
+
+#[test]
+fn test_unordered_declaration() {
+    let states = parse_config("tests/basic_unordered_declaration.input", InputType::File);
+    assert_ne!(states, Err(()), "pasring failed");
+
+    let (states, state_names) = states.unwrap();
+    assert_eq!(check_unachievable_states(&states), Ok(()), "unachievable states found");
+}

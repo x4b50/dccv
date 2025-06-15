@@ -1,0 +1,18 @@
+// this should test if states can be defined before they're invoked
+Start [
+    start_1 {
+        > state_1
+    },
+]
+
+predefined_state {
+    > termination
+}
+
+state_1 {
+    > [predefined_state, termination]
+}
+
+Termination termination {
+    // empty because at the time of writing there are no conditions
+}
