@@ -1,1 +1,3 @@
 /target
+tests/dev_testing.rs
+tests/dev_testing.input

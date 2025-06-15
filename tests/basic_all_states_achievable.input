@@ -1,0 +1,21 @@
+// this test should parse and be valid in terms of achieving all states
+Start [
+    start_1 {
+        > state_1
+    },
+    start_2 {
+        > [state_1, state_2]
+    }
+]
+
+state_1 {
+    > [state_2, termination]
+}
+
+state_2 {
+    > termination
+}
+
+Termination termination {
+    // empty because at the time of writing there are no conditions
+}

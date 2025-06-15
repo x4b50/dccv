@@ -9,7 +9,8 @@ Once difference that can be semantically meaningful is that state must be active
 
 ## Implementation todos
 
-- [ ] parse and validate the most baisc, conditionless system
+- [x] parse and validate the most baisc, conditionless system
+- [ ] add string literal names to allow spaces
 
 - [ ] Possible starting and terminating states
 Each state (except above) must declare:

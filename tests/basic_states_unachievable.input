@@ -1,0 +1,18 @@
+// this test should parse but fail achievability validation
+Start [
+    start_1 {
+        > state_1
+    },
+]
+
+state_1 {
+    > termination
+}
+
+unachievable_state {
+    > state_1
+}
+
+Termination termination {
+    // empty because at the time of writing there are no conditions
+}

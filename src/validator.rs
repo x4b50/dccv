@@ -2,27 +2,39 @@
 
 // TODO: for much later: if you have a lot of vectors, etc. use custom allocators
 #[derive(PartialEq, Debug)]
-struct State {
+enum State {
     // requirements: Vec<Condition>,
     // how to encode what conditions are set outright, what are achievable and what are mutually exclusive?
     // conditions: Vec<Condition>,
-    transitions: Vec<(StateIndexer, Vec<Condition>)>,
-    // TODO: something with what other states are exclusive to this one
+    Start {
+        transitions: Vec<(StateIndexer, Vec<Condition>)>,
+    },
+    Base {
+        transitions: Vec<(StateIndexer, Vec<Condition>)>,
+    },
+    Termination {
+        // empty for now
+    },
 }
 
 // TODO: change to static &str
-// TODO: use a hashmap for name -> idx
 #[derive(PartialEq, Debug)]
 pub struct States {
     states: Vec<State>,
 }
 
-// should conditions be strings w/ just their names, hashes or something else?
 #[derive(PartialEq, Debug)]
 struct Condition;
 #[derive(PartialEq, Debug)]
 struct StateIndexer { v: usize }
-// TODO: backpatching indexes while parsing states will be an issue
+
+use std::collections::HashMap;
+#[derive(Debug, PartialEq)]
+pub struct Table {
+    // TODO: maybe change to str
+    indexes: HashMap<String, usize>,
+    names: Vec<String>
+}
 
 impl States {
     fn new() -> States {
@@ -40,14 +52,6 @@ impl Index<StateIndexer> for States {
     fn index(&self, idx:StateIndexer) -> &Self::Output {
         &self.states[idx.v]
     }
-}
-
-use std::collections::HashMap;
-#[derive(Debug, PartialEq)]
-pub struct Table {
-    // TODO: change to str
-    indexes: HashMap<String, usize>,
-    names: Vec<String>
 }
 
 // to ensure proper handling such that output of hashmap is an index to the vec
@@ -85,11 +89,50 @@ impl Table {
     }
 }
 
+
+pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
+    let goal = states.states.len();
+    let mut count = 0;
+    let mut achieved = vec![false; goal];
+    let mut unachievable = vec![];
+
+    'l: for (i, state) in states.states.iter().enumerate() {
+        match state {
+            State::Start{transitions} => {
+                achieved[i] = true; count += 1;
+                for (idx, _) in transitions {
+
+                    if !achieved[idx.v] {
+                        achieved[idx.v] = true;
+                        count += 1;
+                        if count == goal {break 'l}
+                    }
+                }
+            },
+            State::Base{transitions} => for (idx, _) in transitions {
+                // first check if this state can be achieved
+                // might have to loop over the states multiple times if you allow for out of order definitions
+                if !achieved[i] {unachievable.push(i); continue}
+                if !achieved[idx.v] {
+                    achieved[idx.v] = true;
+                    count += 1;
+                    if count == goal {break 'l}
+                }
+            },
+            State::Termination{} => if !achieved[i] {unachievable.push(i)}
+        }
+    }
+
+    if unachievable.len() > 0 {return Err(unachievable)}
+    if count < goal {panic!("Not all states are achievable, yet we didn't find the unachievable ones")}
+    Ok(())
+}
+
+
 // TODO: during parsing each state and condition identifier should be first gathered in a list of
 // string, after that they should be assigned indeces 
 // 
 // ? array of strings, where index is index to state or hashmap
-
 
 pub mod parser {
     use crate::validator::*;
@@ -100,7 +143,7 @@ pub mod parser {
         }
     }
 
-    // trait for checking if alphanumeric of '_' because rust doesn't allow methods on primitives
+    // trait for checking if alphanumeric or '_' because rust doesn't allow methods on primitives
     trait Ident { fn is_ident(&self) -> bool; }
     impl Ident for char {
         fn is_ident(&self) -> bool {
@@ -108,13 +151,21 @@ pub mod parser {
         }
     }
 
+    pub enum InputType {
+        File,
+        String,
+    }
+
     // tmp empty, should return why there was an error
     // TODO: vector of error enums, maybe with positions or something like that
     // then the caller can decide to print error messages
-    pub fn parse_config(input_path: &str) -> Result<(States, Table), ()> {
-        let contents = match std::fs::read_to_string(input_path) {
-            Ok(c) => cvec!(c),
-            Err(e) => {eprintln!("{e}"); return Err(());}
+    pub fn parse_config(input: &str, input_type: InputType) -> Result<(States, Table), ()> {
+        let contents = match input_type {
+            InputType::File => match std::fs::read_to_string(input) {
+                Ok(c) => cvec!(c),
+                Err(e) => {eprintln!("{e}"); return Err(());}
+            }
+            InputType::String => cvec!(input)
         };
 
         let mut state_names = Table::new();
@@ -138,21 +189,35 @@ pub mod parser {
 
         let mut states_patched = States::new();
         // backpatch the transition names in StateInt to indexes in State
-        for state in starting_states.iter().chain(states.iter()) {
-            let mut transitions = vec![];
-            for tr in &state.transitions {
-                let name = String::from_iter(tr.iter());
-                if state_names.has_name(&name) {
-                    transitions.push((
-                            StateIndexer {v:state_names.index_of(&name)},
-                            vec![]));
-                } else {
-                    eprintln!("undefined state: {}", name);
-                    return Err(())
+        fn backpatch_transitions(patched: &mut States, names: &Table, states: Vec<StateInt>, t: StateType)
+            -> Result<(), ()> {
+            for state in states {
+                let mut transitions = vec![];
+                for tr in &state.transitions {
+                    let name = String::from_iter(tr.iter());
+                    if names.has_name(&name) {
+                        transitions.push((
+                                StateIndexer {v:names.index_of(&name)},
+                                vec![]));
+                    } else {
+                        eprintln!("undefined state: {}", name);
+                        return Err(())
+                    }
                 }
+                patched.push(match t {
+                    StateType::Base => State::Base{transitions},
+                    StateType::Start => State::Start{transitions},
+                    StateType::Termination => if transitions.len() == 0 {State::Termination{}}
+                        else {return Err(())},
+                });
             }
-            states_patched.push(State {transitions});
+            Ok(())
         }
+
+        // TODO: idk if this can mess up the order between states and state_names
+        backpatch_transitions(&mut states_patched, &state_names, starting_states, StateType::Start)?;
+        backpatch_transitions(&mut states_patched, &state_names, states, StateType::Base)?;
+        backpatch_transitions(&mut states_patched, &state_names, termination_states, StateType::Termination)?;
 
         Ok((states_patched, state_names))
     }
@@ -204,13 +269,14 @@ pub mod parser {
                                 ListTypes::Chars(_) =>
                                     panic!("parsing a list of states shouldn't return `Chars`")
                             }).collect());
+                            break;
                         }
                         Err(_) => return Err(())
                     }
                 }
 
                 char if char.is_ident() => {
-                    match parse_state(&contents[i..], StateType::State) {
+                    match parse_state(&contents[i..], StateType::Base) {
                         Ok((offset, state)) => {
                             i += offset;
                             states.push(state);
@@ -305,7 +371,7 @@ pub mod parser {
     enum StateType {
         Start,
         Termination,
-        State,
+        Base,
     }
 
     fn parse_state(contents: &[char], t: StateType) -> Result<(usize, StateInt), ()> {
