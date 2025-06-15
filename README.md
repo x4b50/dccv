@@ -11,8 +11,11 @@ Once difference that can be semantically meaningful is that state must be active
 
 - [x] parse and validate the most baisc, conditionless system
 - [ ] add string literal names to allow spaces
+- [ ] do proper error handling and error reporting
+- [ ] logical operations on conditions
 
-- [ ] Possible starting and terminating states
+- [x] Possible starting and terminating states
+
 Each state (except above) must declare:
 - [ ] what conditions must be met to enable transitioning to it (not applicable to starting states)
 - [ ] what conditions must be met to advance to another state and if that advancement is reversible / two-way (having a separation between outgoing and ingoing conditions should lower the complexity on the user end) (not applicable to terminating states)
@@ -29,7 +32,8 @@ Incompatibility of conditions must be declared.
 Should the scope of all conditions and states be global, or should there be name spacing for recursive systems?
 
 Checker must validate that:
-- [ ] each state and state transition is achievable 
+- [x] each state is achievable 
+- [ ] each state transition is achievable 
 - [ ] no two incompatible states/conditions can be achieved at the same time / in sequence 
 States and conditions might have an only one way temporal incompatibility 
 (There might be a distinction between states that are incompatible in tandem and in general)
