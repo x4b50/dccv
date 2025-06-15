@@ -3,17 +3,17 @@
 // TODO: for much later: if you have a lot of vectors, etc. use custom allocators
 #[derive(PartialEq, Debug)]
 enum State {
-    // requirements: Vec<Condition>,
     // how to encode what conditions are set outright, what are achievable and what are mutually exclusive?
     // conditions: Vec<Condition>,
     Start {
         transitions: Vec<(StateIndexer, Vec<Condition>)>,
     },
     Base {
+        requirements: Vec<Condition>,
         transitions: Vec<(StateIndexer, Vec<Condition>)>,
     },
     Termination {
-        // empty for now
+        requirements: Vec<Condition>,
     },
 }
 
@@ -24,9 +24,9 @@ pub struct States {
 }
 
 #[derive(PartialEq, Debug)]
-struct Condition;
+struct Condition(usize);
 #[derive(PartialEq, Debug)]
-struct StateIndexer { v: usize }
+struct StateIndexer(usize);
 
 use std::collections::HashMap;
 #[derive(Debug, PartialEq)]
@@ -50,7 +50,7 @@ use std::ops::Index;
 impl Index<StateIndexer> for States {
     type Output = State;
     fn index(&self, idx:StateIndexer) -> &Self::Output {
-        &self.states[idx.v]
+        &self.states[idx.0]
     }
 }
 
@@ -105,25 +105,25 @@ pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
                 State::Start{transitions} => if !checked[i] {
                     checked[i] = true; achieved[i] = true; count += 1;
                     for (idx, _) in transitions {
-                        if !achieved[idx.v] {
-                            achieved[idx.v] = true;
+                        if !achieved[idx.0] {
+                            achieved[idx.0] = true;
                             count += 1;
                             if count == goal {break 'l}
                         }
                     }
                 },
-                State::Base{transitions} => if !checked[i] {
+                State::Base{transitions, ..} => if !checked[i] {
                     checked[i] = true;
                     for (idx, _) in transitions {
                         if !achieved[i] {unachievable.push(i); continue}
-                        if !achieved[idx.v] {
-                            achieved[idx.v] = true;
+                        if !achieved[idx.0] {
+                            achieved[idx.0] = true;
                             count += 1;
                             if count == goal {break 'l}
                         }
                     }
                 },
-                State::Termination{} => if !achieved[i] {unachievable.push(i)}
+                State::Termination{..} => if !achieved[i] {unachievable.push(i)}
             }
         }
         if count == prev_count {break}
@@ -198,27 +198,48 @@ pub mod parser {
             Err(_) => return Err(())
         }
 
-        let mut states_patched = States::new();
-        // backpatch the transition names in StateInt to indexes in State
-        fn backpatch_transitions(patched: &mut States, names: &Table, states: Vec<StateInt>, t: StateType)
+        let mut cond_names = Table::new();
+        for state in starting_states.iter().chain(states.iter()).chain(termination_states.iter()) {
+            for req in &state.requirements {
+                match cond_names.try_insert(String::from_iter(req.iter())) {
+                    Ok(()) => (), Err(_) => (),
+                    // TODO: for now no problem if couldn't insert, because if usage is definition
+                    // we don't care about redefinitions
+                }
+            }
+        }
+
+        fn backpatch(patched: &mut States, state_names: &Table, cond_names: &Table, states: Vec<StateInt>, t: StateType)
             -> Result<(), ()> {
             for state in states {
                 let mut transitions = vec![];
                 for tr in &state.transitions {
                     let name = String::from_iter(tr.iter());
-                    if names.has_name(&name) {
+                    if state_names.has_name(&name) {
                         transitions.push((
-                                StateIndexer {v:names.index_of(&name)},
-                                vec![]));
+                                StateIndexer(state_names.index_of(&name)),
+                                vec![])); // TODO: will also need to patch transition conditions
                     } else {
                         eprintln!("undefined state: {}", name);
                         return Err(())
                     }
                 }
+
+                let mut requirements = vec![];
+                for req in &state.requirements {
+                    let name = String::from_iter(req.iter());
+                    if cond_names.has_name(&name) {
+                        requirements.push(Condition(cond_names.index_of(&name)));
+                    } else {
+                        eprintln!("undefined condition: {}", name);
+                        return Err(())
+                    }
+                }
+
                 patched.push(match t {
-                    StateType::Base => State::Base{transitions},
+                    StateType::Base => State::Base{transitions, requirements},
                     StateType::Start => State::Start{transitions},
-                    StateType::Termination => if transitions.len() == 0 {State::Termination{}}
+                    StateType::Termination => if transitions.len() == 0 {State::Termination{requirements}}
                         else {return Err(())},
                 });
             }
@@ -226,9 +247,10 @@ pub mod parser {
         }
 
         // TODO: idk if this can mess up the order between states and state_names
-        backpatch_transitions(&mut states_patched, &state_names, starting_states, StateType::Start)?;
-        backpatch_transitions(&mut states_patched, &state_names, states, StateType::Base)?;
-        backpatch_transitions(&mut states_patched, &state_names, termination_states, StateType::Termination)?;
+        let mut states_patched = States::new();
+        backpatch(&mut states_patched, &state_names, &cond_names, starting_states, StateType::Start)?;
+        backpatch(&mut states_patched, &state_names, &cond_names, states, StateType::Base)?;
+        backpatch(&mut states_patched, &state_names, &cond_names, termination_states, StateType::Termination)?;
 
         Ok((states_patched, state_names))
     }
@@ -304,10 +326,12 @@ pub mod parser {
         Ok((i, (start_states, states, termination_states)))
     }
 
+    #[derive(PartialEq)]
     enum ListElements {
         Starting,
         StateName,
         Terminating,
+        Requirement,
     }
 
     #[derive(Debug)]
@@ -329,10 +353,11 @@ pub mod parser {
                 char if char.is_whitespace() => (),
                 '/' => {i += advance_comment(&contents[i+1..])}
                 '[' => {multiple = true;},
-                ']' => {
-                    // allows for empty lists `[]`
-                    return Ok((i, list))
-                }
+                ']' => return Ok((i, list)), // allows for empty lists `[]`
+                '(' => if of_what == ListElements::Requirement {multiple = true;}
+                else {return Err(())},
+                ')' => return Ok((i, list)),
+
                 ',' => {
                     // for now it technically doesn't do anything, because all list elements have a
                     // termination point of their own
@@ -340,9 +365,10 @@ pub mod parser {
                         return Err(())
                     }
                 }
+
                 char if char.is_ident() => {
                     match of_what {
-                        ListElements::StateName => {
+                        ListElements::StateName | ListElements::Requirement => {
                             let mut j = 0;
                             while i+j < contents.len() && contents[i+j].is_ident() {j+=1;}
                             list.push(ListTypes::Chars(&contents[i..i+j]));
@@ -388,6 +414,7 @@ pub mod parser {
     fn parse_state(contents: &[char], t: StateType) -> Result<(usize, StateInt), ()> {
         let mut ident = None;
         let mut block = None;
+        let mut requirements = vec![];
 
         let mut i = 0;
         while i < contents.len() {
@@ -404,6 +431,22 @@ pub mod parser {
                     } else {return Err(())}
                 },
 
+                '(' => if ident != None {
+                    match parse_list(&contents[i..], ListElements::Requirement) {
+                        Ok((offset, list)) => {
+                            i += offset;
+                            requirements.append(&mut list.into_iter().map(|x| match x {
+                                ListTypes::Chars(c) => c,
+                                ListTypes::StateInt(_) =>
+                                    panic!("parsing list of `Requirement` shouldn't return any `StateInt`")
+                            }).collect());
+                        }
+                        Err(_) => return Err(())
+                    }
+                } else {
+                    return Err(())
+                },
+
                 '{' => { i += 1;
                     match parse_block(&contents[i..], t) {
                         Ok((offset, b)) => {
@@ -414,16 +457,15 @@ pub mod parser {
                     }
                 }
 
-                '}' => {
-                    if let Some(block) = block {
-                        if let Some(ident) = ident {
-                            return Ok((i, StateInt {
-                                name: ident,
-                                transitions: block.transition_names
-                            }))
-                        } else {return Err(())}
+                '}' => if let Some(block) = block {
+                    if let Some(ident) = ident {
+                        return Ok((i, StateInt {
+                            name: ident,
+                            requirements,
+                            transitions: block.transition_names,
+                        }))
                     } else {return Err(())}
-                },
+                } else {return Err(())},
                 _ => todo!("failed with input {:?}", &contents[i..])
             }
             i += 1;
@@ -434,7 +476,8 @@ pub mod parser {
     #[derive(Debug)]
     struct StateInt<'a> {
         name: &'a [char],
-        transitions: Vec<&'a[char]>
+        requirements: Vec<&'a[char]>,
+        transitions: Vec<&'a[char]>,
     }
 
     #[derive(Debug)]
