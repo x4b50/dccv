@@ -19,7 +19,6 @@ enum State {
     },
 }
 
-// TODO: change to static &str
 #[derive(PartialEq, Debug)]
 pub struct States {
     states: Vec<State>,
@@ -39,8 +38,6 @@ impl Index<StateIndexer> for States {
         &self.states[idx.0]
     }
 }
-
-// to ensure proper handling such that output of hashmap is an index to the vec
 
 pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
     let goal = states.states.len();
@@ -91,12 +88,6 @@ pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
     Ok(())
 }
 
-
-// TODO: during parsing each state and condition identifier should be first gathered in a list of
-// string, after that they should be assigned indeces 
-// 
-// ? array of strings, where index is index to state or hashmap
-
 pub mod parser {
     use crate::validator::*;
     use std::str::from_utf8;
@@ -115,7 +106,7 @@ pub mod parser {
     }
 
     // tmp empty, should return why there was an error
-    // TODO: vector of error enums, maybe with positions or something like that
+    // TODO: maybe a vector of error enums, maybe with positions or something like that
     // then the caller can decide to print error messages
     pub fn parse_config(input: &str, input_type: InputType) -> Result<(States, Idents), ()> {
         let contents = match input_type {
@@ -224,7 +215,6 @@ pub mod parser {
         }
     }
 
-    // TODO: do I need to use Strings?
     fn tokenize(input: &str) -> Result<(Vec<Token>, Idents), ()> {
         let chars = input.as_bytes();
         let mut tokens = vec![];
@@ -244,7 +234,7 @@ pub mod parser {
                 b']' => tokens.push( Token {row, col: i-rb+1, t: TokenType::BracketC}),
                 b',' => tokens.push( Token {row, col: i-rb+1, t: TokenType::Comma}),
                 b'>' => tokens.push( Token {row, col: i-rb+1, t: TokenType::AngleC}),
-                b'\n' => (), // ignore here, because if something returns just before '\n' it won't catch it
+                b'\n' => (), // ignore, because if something returns at '\n', it will advance `i` and won't catch it
                 b'/' => match chars[i+1] {
                     b'/' => while i < chars.len() {
                         i += 1; if chars[i] == b'\n' {break}
@@ -255,8 +245,6 @@ pub mod parser {
                 char if char.is_ident() => {
                     let mut len = 0;
                     while i+len < chars.len() && chars[i+len].is_ident() {len+=1}
-                    // let idx = idents.len();
-                    // for c in chars[i..i+len].iter() {idents.push(*c)}
                     let ident_idx = idents.add_if_not_in(&chars[i..i+len]);
                     tokens.push(Token {row, col: i-rb+1, t: TokenType::Ident(ident_idx)});
                     i += len-1;
@@ -407,7 +395,6 @@ pub mod parser {
         }
     }
 
-    // why does the list have to return i+1 ?
     fn parse_list<T: ListParsable>(tokens: &[Token]) -> Result<(usize, Vec<T>), ()> {
         use std::any::TypeId;
         let mut multiple = false;
@@ -434,7 +421,7 @@ pub mod parser {
             }
             i += 1;
         }
-        unimplemented!();
+        unimplemented!("what to do when you run out of tokens?");
     }
 
     fn parse_state(tokens: &[Token]) -> Result<(usize, StateInt), ()> {
