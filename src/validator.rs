@@ -5,16 +5,26 @@
 enum State {
     // how to encode what conditions are set outright, what are achievable and what are mutually exclusive?
     Start {
-        name: StateIdent,
+        name: StateName,
+        set: Vec<Condition>,
+        unset: Vec<Condition>,
+        maybe: Vec<Condition>,
+        maybe_set: Vec<Condition>,
+        maybe_unset: Vec<Condition>,
         transitions: Vec<(StateIndexer, Vec<Condition>)>,
     },
     Base {
-        name: StateIdent,
+        name: StateName,
         requirements: Vec<Condition>,
+        set: Vec<Condition>,
+        unset: Vec<Condition>,
+        maybe: Vec<Condition>,
+        maybe_set: Vec<Condition>,
+        maybe_unset: Vec<Condition>,
         transitions: Vec<(StateIndexer, Vec<Condition>)>,
     },
     Termination {
-        name: StateIdent,
+        name: StateName,
         requirements: Vec<Condition>,
     },
 }
@@ -25,11 +35,12 @@ pub struct States {
 }
 
 #[derive(PartialEq, Debug)]
-struct Condition(usize);
-#[derive(PartialEq, Debug)]
 struct StateIndexer(usize);
-#[derive(PartialEq, Debug)]
-struct StateIdent(usize);
+
+#[derive(Debug, PartialEq, Clone)]
+struct IdentsIndexer(usize);
+type Condition = IdentsIndexer;
+type StateName = IdentsIndexer;
 
 use std::ops::Index;
 impl Index<StateIndexer> for States {
@@ -121,7 +132,7 @@ pub mod parser {
             Err(_) => return Err(())
         };
 
-        match parse_states(&tokens, &idents) {
+        match parse_states(&tokens) {
             Ok(s) => Ok((s, idents)),
             Err(_) => todo!("handle error")
         }
@@ -139,6 +150,11 @@ pub mod parser {
         Ident(usize),
         Start,
         Termination,
+        Set,
+        Unset,
+        MaySet,
+        MayUnset,
+        MayChange,
         ParenO,
         ParenC,
         CurlyO,
@@ -146,6 +162,7 @@ pub mod parser {
         BracketO,
         BracketC,
         Comma,
+        Colon,
         AngleC,
     }
 
@@ -234,7 +251,19 @@ pub mod parser {
                 b'[' => tokens.push( Token {row, col: i-rb+1, t: TokenType::BracketO}),
                 b']' => tokens.push( Token {row, col: i-rb+1, t: TokenType::BracketC}),
                 b',' => tokens.push( Token {row, col: i-rb+1, t: TokenType::Comma}),
+                b':' => tokens.push( Token {row, col: i-rb+1, t: TokenType::Colon}),
                 b'>' => tokens.push( Token {row, col: i-rb+1, t: TokenType::AngleC}),
+                b'+' => tokens.push( Token {row, col: i-rb+1, t: TokenType::Set}),
+                b'-' => tokens.push( Token {row, col: i-rb+1, t: TokenType::Unset}),
+                b'?' => {
+                    if i+1 < chars.len() {
+                        match chars[i+1] {
+                            b'+' => {tokens.push( Token {row, col: i-rb+1, t: TokenType::MaySet}); i += 1}
+                            b'-' => {tokens.push( Token {row, col: i-rb+1, t: TokenType::MayUnset}); i += 1}
+                            _ => tokens.push( Token {row, col: i-rb+1, t: TokenType::MayChange}),
+                        }
+                    } else {return Err(())}
+                }
                 b'\n' => (), // ignore, because if something returns at '\n', it will advance `i` and won't catch it
                 b'/' => match chars[i+1] {
                     b'/' => while i < chars.len() {
@@ -265,7 +294,7 @@ pub mod parser {
         Ok((tokens, idents))
     }
 
-    fn parse_states(tokens: &[Token], idents: &Idents) -> Result<States, ()> {
+    fn parse_states(tokens: &[Token]) -> Result<States, ()> {
         let (mut start_states, mut base_states, mut termination_states) = (vec![], vec![], vec![]);
         let mut i = 0;
         while i < tokens.len() {
@@ -288,7 +317,7 @@ pub mod parser {
                         Err(_) => return Err(())
                     }
                 }
-                TokenType::Ident(id) => {
+                TokenType::Ident(_) => {
                     match parse_state(&tokens[i..]) {
                         Ok((offset, state)) => {
                             i += offset;
@@ -309,20 +338,25 @@ pub mod parser {
         for state in &start_states {
             assert!(state.requirements.len() == 0);
             let mut transitions = vec![];
-            't: for tr_name in &state.transitions {
+            't: for tr in &state.transitions {
                 let mut offset = start_states.len();
                 for (i, st) in base_states.iter().enumerate() {
-                    if *tr_name == st.name {transitions.push((StateIndexer(i+offset), vec![])); continue 't}
+                    if tr.name == st.name {transitions.push((StateIndexer(i+offset), tr.conditions.clone())); continue 't}
                 }
                 offset += base_states.len();
                 for (i, st) in termination_states.iter().enumerate() {
-                    if *tr_name == st.name {transitions.push((StateIndexer(i+offset), vec![])); continue 't}
+                    if tr.name == st.name {transitions.push((StateIndexer(i+offset), tr.conditions.clone())); continue 't}
                 }
                 eprintln!("returned");
                 return Err(())
             }
             states.push(State::Start {
-                name: StateIdent(state.name.0),
+                name: state.name.clone(),
+                set: state.set.clone(),
+                unset: state.unset.clone(),
+                maybe: state.maybe.clone(),
+                maybe_set: state.maybe_set.clone(),
+                maybe_unset: state.maybe_unset.clone(),
                 transitions
             })
         }
@@ -330,25 +364,30 @@ pub mod parser {
         for state in &base_states {
             let mut requirements = vec![];
             for req in &state.requirements {
-                requirements.push(Condition(req.0));
+                requirements.push(req.clone());
             }
 
             let mut transitions = vec![];
-            't: for tr_name in &state.transitions {
+            't: for tr in &state.transitions {
                 let mut offset = start_states.len();
                 for (i, st) in base_states.iter().enumerate() {
-                    if *tr_name == st.name {transitions.push((StateIndexer(i+offset), vec![])); continue 't}
+                    if tr.name == st.name {transitions.push((StateIndexer(i+offset), tr.conditions.clone())); continue 't}
                 }
                 offset += base_states.len();
                 for (i, st) in termination_states.iter().enumerate() {
-                    if *tr_name == st.name {transitions.push((StateIndexer(i+offset), vec![])); continue 't}
+                    if tr.name == st.name {transitions.push((StateIndexer(i+offset), tr.conditions.clone())); continue 't}
                 }
                 eprintln!("returned");
                 return Err(())
             }
             states.push(State::Base {
-                name: StateIdent(state.name.0),
+                name: state.name.clone(),
                 requirements,
+                set: state.set.clone(),
+                unset: state.unset.clone(),
+                maybe: state.maybe.clone(),
+                maybe_set: state.maybe_set.clone(),
+                maybe_unset: state.maybe_unset.clone(),
                 transitions
             })
         }
@@ -357,10 +396,10 @@ pub mod parser {
             assert!(state.transitions.len() == 0);
             let mut requirements = vec![];
             for req in &state.requirements {
-                requirements.push(Condition(req.0));
+                requirements.push(req.clone());
             }
             states.push(State::Termination {
-                name: StateIdent(state.name.0),
+                name: state.name.clone(),
                 requirements
             })
         }
@@ -372,14 +411,21 @@ pub mod parser {
     struct StateInt {
         name: StateName,
         requirements: Vec<ReqName>,
-        transitions: Vec<StateName>, // TODO add contidions
+        set: Vec<Condition>,
+        unset: Vec<Condition>,
+        maybe: Vec<Condition>,
+        maybe_set: Vec<Condition>,
+        maybe_unset: Vec<Condition>,
+        transitions: Vec<Transition>,
     }
 
-    #[derive(Debug, PartialEq)]
-    struct IdentsIndexer(usize);
+    #[derive(Debug)]
+    struct Transition {
+        name: StateName,
+        conditions: Vec<Condition>
+    }
+    // might not be necessary
     type ReqName = IdentsIndexer;
-    type CondName = IdentsIndexer;
-    type StateName = IdentsIndexer;
 
     trait ListParsable: Sized + 'static + std::fmt::Debug {
         fn parse_item(tokens: &[Token]) -> Result<(usize, Self), ()>;
@@ -388,6 +434,25 @@ pub mod parser {
     impl ListParsable for StateInt {
         fn parse_item(tokens: &[Token]) -> Result<(usize, StateInt), ()> {
             parse_state(tokens)
+        }
+    }
+
+    impl ListParsable for Transition {
+        fn parse_item(tokens: &[Token]) -> Result<(usize, Transition), ()> {
+            if tokens.len() < 2 {return Err(())}
+            if let TokenType::Ident(idx) = tokens[0].t {
+                if let TokenType::Colon = tokens[1].t {
+                    let i = 2;
+                    match parse_list::<Condition>(&tokens[i..]) {
+                        Ok((offset, conditions)) => {
+                            return Ok((i+offset, Transition{name: IdentsIndexer(idx), conditions}))
+                        },
+                        Err(()) => return Err(())
+                    }
+                } else {
+                    Ok((0, Transition {name: IdentsIndexer(idx), conditions: vec![]}))
+                }
+            } else {Err(())}
         }
     }
 
@@ -414,6 +479,7 @@ pub mod parser {
                     multiple = true;
                 } else {return Err(())}
                 TokenType::Comma => if !multiple {return Err(())}
+                TokenType::Colon => todo!(),
                 TokenType::Ident(_) => match T::parse_item(&tokens[i..]) {
                     Ok((offset, name)) => {
                         i += offset;
@@ -422,7 +488,9 @@ pub mod parser {
                     }
                     Err(_) => todo!()
                 }
+
                 TokenType::CurlyO | TokenType::CurlyC | TokenType::AngleC => todo!(),
+                TokenType::Set | TokenType::Unset | TokenType::MaySet | TokenType::MayUnset | TokenType::MayChange => todo!(),
                 TokenType::Start | TokenType::Termination => panic!("list should never start with `Start` or `Termination` block")
             }
             i += 1;
@@ -434,6 +502,11 @@ pub mod parser {
         let mut name = None;
         let mut block_opened = false;
         let mut requirements = vec![];
+        let mut set = vec![];
+        let mut unset = vec![];
+        let mut maybe = vec![];
+        let mut maybe_set = vec![];
+        let mut maybe_unset = vec![];
         let mut transitions = vec![];
 
         let mut i = 0;
@@ -454,16 +527,22 @@ pub mod parser {
                 TokenType::CurlyC => {
                     if !block_opened {return Err(())}
                     if let Some(idx) = name {
-                        return Ok((i, StateInt{name: IdentsIndexer(idx), requirements, transitions}))
+                        return Ok((i, StateInt{
+                            name: IdentsIndexer(idx),
+                            requirements, set, unset, maybe, maybe_set, maybe_unset, transitions
+                        }))
                     } else {return Err(())}
                 },
+
                 TokenType::BracketO => todo!(),
                 TokenType::BracketC => todo!(),
                 TokenType::Comma => todo!(),
+                TokenType::Colon => todo!(),
+
                 TokenType::AngleC => {
                     if i+1 >= tokens.len() {eprintln!("expected list but no tokens found"); return Err(())}
                     i += 1;
-                    match parse_list::<StateName>(&tokens[i..]) {
+                    match parse_list::<Transition>(&tokens[i..]) {
                         Ok((offset, mut trs)) => {
                             i += offset;
                             transitions.append(&mut trs);
@@ -471,6 +550,28 @@ pub mod parser {
                         _ => todo!()
                     }
                 }
+
+                TokenType::Set | TokenType::Unset |
+                TokenType::MaySet | TokenType::MayUnset | TokenType::MayChange => {
+                    if i+1 >= tokens.len() {eprintln!("expected list but no tokens found"); return Err(())}
+                    let tp = &tokens[i].t;
+                    i += 1;
+                    match parse_list::<Condition>(&tokens[i..]) {
+                        Ok((offset, mut list)) => {
+                            i += offset;
+                            match tp {
+                                TokenType::Set => set.append(&mut list),
+                                TokenType::Unset => unset.append(&mut list),
+                                TokenType::MaySet => maybe_set.append(&mut list),
+                                TokenType::MayUnset => maybe_unset.append(&mut list),
+                                TokenType::MayChange => maybe.append(&mut list),
+                                _ => unreachable!("it should never be another type")
+                            }
+                        }
+                        _ => todo!()
+                    }
+                }
+
                 TokenType::Start => {
                     eprintln!("state name cannot use the keyword `Start`");
                     return Err(())
@@ -485,3 +586,5 @@ pub mod parser {
         unimplemented!();
     }
 }
+
+// TODO: add something (;) to denote that state has no interions - useful for termination
