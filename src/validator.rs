@@ -90,7 +90,6 @@ pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
 
 pub mod parser {
     use crate::validator::*;
-    use std::str::from_utf8;
 
     // trait for checking if alphanumeric or '_' because rust doesn't allow methods on primitives
     trait IdentChar { fn is_ident(&self) -> bool; }
@@ -138,6 +137,8 @@ pub mod parser {
     #[derive(Debug)]
     enum TokenType {
         Ident(usize),
+        Start,
+        Termination,
         ParenO,
         ParenC,
         CurlyO,
@@ -202,7 +203,7 @@ pub mod parser {
         fn name_at(&self, i: usize) -> &str {
             let idx = self.idents[i].idx;
             let len = self.idents[i].len;
-            match from_utf8(&self.chars[idx..idx+len]) {
+            match std::str::from_utf8(&self.chars[idx..idx+len]) {
                 Ok(s) => s,
                 Err(_) => panic!("invalid ident {i}, at index: {idx} with length: {len}"),
             }
@@ -245,8 +246,14 @@ pub mod parser {
                 char if char.is_ident() => {
                     let mut len = 0;
                     while i+len < chars.len() && chars[i+len].is_ident() {len+=1}
-                    let ident_idx = idents.add_if_not_in(&chars[i..i+len]);
-                    tokens.push(Token {row, col: i-rb+1, t: TokenType::Ident(ident_idx)});
+                    match &chars[i..i+len] {
+                        b"Start" => tokens.push(Token{row, col: i-rb+1, t: TokenType::Start}),
+                        b"Termination" => tokens.push(Token{row, col: i-rb+1, t: TokenType::Termination}),
+                        _ => {
+                            let ident_idx = idents.add_if_not_in(&chars[i..i+len]);
+                            tokens.push(Token {row, col: i-rb+1, t: TokenType::Ident(ident_idx)});
+                        }
+                    }
                     i += len-1;
                 },
                 _ => return Err(())
@@ -263,33 +270,31 @@ pub mod parser {
         let mut i = 0;
         while i < tokens.len() {
             match tokens[i].t {
+                TokenType::Start => { i += 1;
+                    match parse_list::<StateInt>(&tokens[i..]) {
+                        Ok((offset, s_states)) => {
+                            i += offset;
+                            start_states = s_states;
+                        }
+                        Err(_) => return Err(())
+                    }
+                }
+                TokenType::Termination => { i += 1;
+                    match parse_list::<StateInt>(&tokens[i..]) {
+                        Ok((offset, t_states)) => {
+                            i += offset;
+                            termination_states = t_states;
+                        }
+                        Err(_) => return Err(())
+                    }
+                }
                 TokenType::Ident(id) => {
-                    match idents.at(id).chars() {
-                        b"Start" => { i += 1;
-                            match parse_list::<StateInt>(&tokens[i..]) {
-                                Ok((offset, s_states)) => {
-                                    i += offset;
-                                    start_states = s_states;
-                                }
-                                Err(_) => return Err(())
-                            }
+                    match parse_state(&tokens[i..]) {
+                        Ok((offset, state)) => {
+                            i += offset;
+                            base_states.push(state);
                         }
-                        b"Termination" => { i += 1;
-                            match parse_list::<StateInt>(&tokens[i..]) {
-                                Ok((offset, t_states)) => {
-                                    i += offset;
-                                    termination_states = t_states;
-                                }
-                                Err(_) => return Err(())
-                            }
-                        }
-                        _ => match parse_state(&tokens[i..]) {
-                            Ok((offset, state)) => {
-                                i += offset;
-                                base_states.push(state);
-                            }
-                            Err(_) => return Err(())
-                        }
+                        Err(_) => return Err(())
                     }
                 }
                 _ => {
@@ -417,7 +422,8 @@ pub mod parser {
                     }
                     Err(_) => todo!()
                 }
-                TokenType::CurlyO | TokenType::CurlyC | TokenType::AngleC => todo!()
+                TokenType::CurlyO | TokenType::CurlyC | TokenType::AngleC => todo!(),
+                TokenType::Start | TokenType::Termination => panic!("list should never start with `Start` or `Termination` block")
             }
             i += 1;
         }
@@ -464,6 +470,14 @@ pub mod parser {
                         }
                         _ => todo!()
                     }
+                }
+                TokenType::Start => {
+                    eprintln!("state name cannot use the keyword `Start`");
+                    return Err(())
+                }
+                TokenType::Termination => {
+                    eprintln!("state name cannot use the keyword `Termination`");
+                    return Err(())
                 }
             }
             i += 1;
