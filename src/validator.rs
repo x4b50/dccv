@@ -1,4 +1,5 @@
-#[allow(dead_code)]
+#[derive(PartialEq, Debug)]
+pub struct TODO;
 
 // TODO: for much later: if you have a lot of vectors, etc. use custom allocators
 #[derive(PartialEq, Debug)]
@@ -34,6 +35,7 @@ pub struct States {
     states: Vec<State>,
 }
 
+// is it even necessary or is it only just glorified usize?
 #[derive(PartialEq, Debug)]
 struct StateIndexer(usize);
 
@@ -50,7 +52,9 @@ impl Index<StateIndexer> for States {
     }
 }
 
-pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
+// only check if there are transition paths leading to a state
+// migth be useful to check some things step by step
+pub fn check_unachievable_states(states: &States) -> Result<TODO, Vec<usize>> {
     let goal = states.states.len();
     let mut count = 0;
     let mut achieved = vec![false; goal];
@@ -96,7 +100,7 @@ pub fn check_unachievable_states(states: &States) -> Result<(), Vec<usize>> {
         if updated.len() > 0 {return Err(updated)}
     }
     if count < goal {panic!("Not all states are achievable, yet we didn't find the unachievable ones")}
-    Ok(())
+    Ok(TODO)
 }
 
 pub mod parser {
@@ -118,18 +122,18 @@ pub mod parser {
     // tmp empty, should return why there was an error
     // TODO: maybe a vector of error enums, maybe with positions or something like that
     // then the caller can decide to print error messages
-    pub fn parse_config(input: &str, input_type: InputType) -> Result<(States, Idents), ()> {
+    pub fn parse_config(input: &str, input_type: InputType) -> Result<(States, Idents), TODO> {
         let contents = match input_type {
             InputType::File => match std::fs::read_to_string(input) {
                 Ok(c) => c,
-                Err(e) => {eprintln!("{e}"); return Err(());}
+                Err(e) => {eprintln!("{e}"); return Err(TODO);}
             }
             InputType::String => input.to_string()
         };
 
         let (tokens, idents) = match tokenize(&contents) {
             Ok((tk, id)) => (tk, id),
-            Err(_) => return Err(())
+            Err(_) => todo!("error reporting")
         };
 
         match parse_states(&tokens) {
@@ -233,7 +237,7 @@ pub mod parser {
         }
     }
 
-    fn tokenize(input: &str) -> Result<(Vec<Token>, Idents), ()> {
+    fn tokenize(input: &str) -> Result<(Vec<Token>, Idents), TODO> {
         let chars = input.as_bytes();
         let mut tokens = vec![];
         let mut idents = Idents::new();
@@ -262,7 +266,7 @@ pub mod parser {
                             b'-' => {tokens.push( Token {row, col: i-rb+1, t: TokenType::MayUnset}); i += 1}
                             _ => tokens.push( Token {row, col: i-rb+1, t: TokenType::MayChange}),
                         }
-                    } else {return Err(())}
+                    } else {todo!("error reporting")}
                 }
                 b'\n' => (), // ignore, because if something returns at '\n', it will advance `i` and won't catch it
                 b'/' => match chars[i+1] {
@@ -285,7 +289,7 @@ pub mod parser {
                     }
                     i += len-1;
                 },
-                _ => return Err(())
+                _ => todo!("error reporting")
             }
             if chars[i] == b'\n' {row += 1; rb = i+1;}
             i += 1;
@@ -294,7 +298,7 @@ pub mod parser {
         Ok((tokens, idents))
     }
 
-    fn parse_states(tokens: &[Token]) -> Result<States, ()> {
+    fn parse_states(tokens: &[Token]) -> Result<States, TODO> {
         let (mut start_states, mut base_states, mut termination_states) = (vec![], vec![], vec![]);
         let mut i = 0;
         while i < tokens.len() {
@@ -305,7 +309,7 @@ pub mod parser {
                             i += offset;
                             start_states = s_states;
                         }
-                        Err(_) => return Err(())
+                        Err(_) => todo!("error reporting")
                     }
                 }
                 TokenType::Termination => { i += 1;
@@ -314,7 +318,7 @@ pub mod parser {
                             i += offset;
                             termination_states = t_states;
                         }
-                        Err(_) => return Err(())
+                        Err(_) => todo!("error reporting")
                     }
                 }
                 TokenType::Ident(_) => {
@@ -323,17 +327,18 @@ pub mod parser {
                             i += offset;
                             base_states.push(state);
                         }
-                        Err(_) => return Err(())
+                        Err(_) => todo!("error reporting")
                     }
                 }
                 _ => {
                     eprintln!("expected state, `Start` block or `Termination` block");
-                    return Err(())
+                    todo!("error reporting")
                 }
             }
             i += 1;
         }
 
+        // update transitions to reflect indeces in states, not indeces in identifiers
         let mut states = vec![];
         for state in &start_states {
             assert!(state.requirements.len() == 0);
@@ -347,8 +352,7 @@ pub mod parser {
                 for (i, st) in termination_states.iter().enumerate() {
                     if tr.name == st.name {transitions.push((StateIndexer(i+offset), tr.conditions.clone())); continue 't}
                 }
-                eprintln!("returned");
-                return Err(())
+                todo!("error reporting")
             }
             states.push(State::Start {
                 name: state.name.clone(),
@@ -377,8 +381,7 @@ pub mod parser {
                 for (i, st) in termination_states.iter().enumerate() {
                     if tr.name == st.name {transitions.push((StateIndexer(i+offset), tr.conditions.clone())); continue 't}
                 }
-                eprintln!("returned");
-                return Err(())
+                todo!("error reporting")
             }
             states.push(State::Base {
                 name: state.name.clone(),
@@ -428,18 +431,18 @@ pub mod parser {
     type ReqName = IdentsIndexer;
 
     trait ListParsable: Sized + 'static + std::fmt::Debug {
-        fn parse_item(tokens: &[Token]) -> Result<(usize, Self), ()>;
+        fn parse_item(tokens: &[Token]) -> Result<(usize, Self), TODO>;
     }
 
     impl ListParsable for StateInt {
-        fn parse_item(tokens: &[Token]) -> Result<(usize, StateInt), ()> {
+        fn parse_item(tokens: &[Token]) -> Result<(usize, StateInt), TODO> {
             parse_state(tokens)
         }
     }
 
     impl ListParsable for Transition {
-        fn parse_item(tokens: &[Token]) -> Result<(usize, Transition), ()> {
-            if tokens.len() < 2 {return Err(())}
+        fn parse_item(tokens: &[Token]) -> Result<(usize, Transition), TODO> {
+            if tokens.len() < 2 {todo!("error reporting")}
             if let TokenType::Ident(idx) = tokens[0].t {
                 if let TokenType::Colon = tokens[1].t {
                     let i = 2;
@@ -447,25 +450,25 @@ pub mod parser {
                         Ok((offset, conditions)) => {
                             return Ok((i+offset, Transition{name: IdentsIndexer(idx), conditions}))
                         },
-                        Err(()) => return Err(())
+                        Err(TODO) => todo!("error reporting")
                     }
                 } else {
                     Ok((0, Transition {name: IdentsIndexer(idx), conditions: vec![]}))
                 }
-            } else {Err(())}
+            } else {Err(TODO)}
         }
     }
 
     impl ListParsable for IdentsIndexer {
-        fn parse_item(tokens: &[Token]) -> Result<(usize, Self), ()> {
-            if tokens.len() < 1 {return Err(())}
+        fn parse_item(tokens: &[Token]) -> Result<(usize, Self), TODO> {
+            if tokens.len() < 1 {todo!("error reporting")}
             if let TokenType::Ident(idx) = tokens[0].t {
                 return Ok((0, Self (idx)))
-            } else {return Err(())}
+            } else {todo!("error reporting")}
         }
     }
 
-    fn parse_list<T: ListParsable>(tokens: &[Token]) -> Result<(usize, Vec<T>), ()> {
+    fn parse_list<T: ListParsable>(tokens: &[Token]) -> Result<(usize, Vec<T>), TODO> {
         use std::any::TypeId;
         let mut multiple = false;
         let mut list: Vec<T> = vec![];
@@ -477,8 +480,8 @@ pub mod parser {
                 TokenType::BracketO => {multiple = true}
                 TokenType::ParenO => if TypeId::of::<T>() == TypeId::of::<ReqName>() {
                     multiple = true;
-                } else {return Err(())}
-                TokenType::Comma => if !multiple {return Err(())}
+                } else {todo!("error reporting")}
+                TokenType::Comma => if !multiple {todo!("error reporting")}
                 TokenType::Colon => todo!(),
                 TokenType::Ident(_) => match T::parse_item(&tokens[i..]) {
                     Ok((offset, name)) => {
@@ -498,7 +501,7 @@ pub mod parser {
         unimplemented!("what to do when you run out of tokens?");
     }
 
-    fn parse_state(tokens: &[Token]) -> Result<(usize, StateInt), ()> {
+    fn parse_state(tokens: &[Token]) -> Result<(usize, StateInt), TODO> {
         let mut name = None;
         let mut block_opened = false;
         let mut requirements = vec![];
@@ -525,13 +528,13 @@ pub mod parser {
                 TokenType::ParenC => todo!(),
                 TokenType::CurlyO => {block_opened = true}
                 TokenType::CurlyC => {
-                    if !block_opened {return Err(())}
+                    if !block_opened {todo!("error reporting")}
                     if let Some(idx) = name {
                         return Ok((i, StateInt{
                             name: IdentsIndexer(idx),
                             requirements, set, unset, maybe, maybe_set, maybe_unset, transitions
                         }))
-                    } else {return Err(())}
+                    } else {todo!("error reporting")}
                 },
 
                 TokenType::BracketO => todo!(),
@@ -540,7 +543,7 @@ pub mod parser {
                 TokenType::Colon => todo!(),
 
                 TokenType::AngleC => {
-                    if i+1 >= tokens.len() {eprintln!("expected list but no tokens found"); return Err(())}
+                    if i+1 >= tokens.len() {eprintln!("expected list but no tokens found"); return Err(TODO)}
                     i += 1;
                     match parse_list::<Transition>(&tokens[i..]) {
                         Ok((offset, mut trs)) => {
@@ -553,7 +556,7 @@ pub mod parser {
 
                 TokenType::Set | TokenType::Unset |
                 TokenType::MaySet | TokenType::MayUnset | TokenType::MayChange => {
-                    if i+1 >= tokens.len() {eprintln!("expected list but no tokens found"); return Err(())}
+                    if i+1 >= tokens.len() {eprintln!("expected list but no tokens found"); return Err(TODO)}
                     let tp = &tokens[i].t;
                     i += 1;
                     match parse_list::<Condition>(&tokens[i..]) {
@@ -574,11 +577,11 @@ pub mod parser {
 
                 TokenType::Start => {
                     eprintln!("state name cannot use the keyword `Start`");
-                    return Err(())
+                    return Err(TODO)
                 }
                 TokenType::Termination => {
                     eprintln!("state name cannot use the keyword `Termination`");
-                    return Err(())
+                    return Err(TODO)
                 }
             }
             i += 1;
