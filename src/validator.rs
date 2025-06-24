@@ -36,7 +36,7 @@ pub struct States {
 }
 
 // is it even necessary or is it only just glorified usize?
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 struct StateIndexer(usize);
 
 #[derive(Debug, PartialEq, Clone)]
@@ -101,6 +101,451 @@ pub fn check_unachievable_states(states: &States) -> Result<TODO, Vec<usize>> {
     }
     if count < goal {panic!("Not all states are achievable, yet we didn't find the unachievable ones")}
     Ok(TODO)
+}
+
+// Comments from the dark times:
+
+// for starting state:
+// 1. DFS: pick first one (or next starting one) and go there
+// 2. add |state, sets/unsets| to "path" and "list"
+// 3. check what transitions are avaliable with current conditions
+// 4.1. avaliable transitions -> continue DFS
+// 4.2. none avaliable (note the error) or termination state ->
+// (none avaliable): loop: change the "maybe" conditions (bin count method), change the last
+//      element of "path" to updated conditions and push to "list", go to 3.
+// 4.3. pop from path and do the above on second to last visited state
+//
+// for every state transition (probably should also include changing "maybe" conditions for
+// cases of state loops) check if it is in the "list", if so change "maybe" conditions, if all
+// of them have also been checked, do 4.3.
+// TODO: somehow keep track of what transitions have been achieved in each state and if you get
+// here then all of them should be achieved
+// ^ NOPE: all of them are required to be achieved only after cheching every way of getting to
+// that state, so in practice, what transitions are achievable is only verifiable at the very end
+// 
+// while deciding to go backwards update a list of conditions that are being checked, but not met
+// this way you will only need to update conditions that influence future choices,
+// instead of doing multiple long round trips to change variables that don't influence the
+// transitions in last state in path
+//
+// when going back keep track of the path that got you to final state, to avoid unnecessarly
+// redoing already checked paths with lower indexes
+//
+// also you might get away with just keeping a list of conditions that are relevant to the last
+// state in the path when you start going back to change them (if there is another path that
+// gets you the same conditions, by taking a different turn then it will simply be checked later
+// and discarded if it has no difference, or advancing and terminating all the same)
+// After all it should check "every" possibility (excluding contextual invariants), not that
+// there is /a/ possibility
+//
+// closing a loop without changing conditions should just make you move back one step, not error
+//
+// in "path" keep track of not only states, but also transitions taken (ex. different
+// transitions from one state to another that have different conditions)
+
+    // iterate starting from starting states
+    // or state "0" that has unconstrained transitions to all starting states
+    // DFS for each state:
+    // 1. set/unset specified conditions
+    // 2. pick first unvisited transition, denoted by:
+    //      a) the "path" has not been walked back -> pick 1st transition
+    //      b) the "path" has been walked back -> pick next transition (the chosen transition is kept in "path" element)
+    //          if all transitions have been checked, go back one state in "path" and repeat 2.
+    //          (conditions set in previous state are stored in "path")
+    // 2.1. if all the transitions have been visited, pop state from "path" and repeat 2.
+    // 2.2. if picked transition is avaliable, push |state index, transition, conditions| to "path" and "list", go to 1.
+    //      unless that combination is already in "list", then go back to 2.
+    //      if transition isn't avaliable, compare its conditions with current, and make note of what
+    //      conditions need to be set/unset, copy "path" to "path_fix"
+    // 2.2.1. traverse back the "path" until you find
+    //      I think this: first place where any of noted conditions appeear (note that some state may unset it)
+    //      ? first place where all of noted conditions have been seen on the way
+    // 2.2.2. note that state in separate variable, change desired conditions, try to pick transition
+    //      denoted by states index in "path", change it in "path_fix" and try to mirror "path" in "path_fix"
+    //      until you get to the end and retry 2.2 (keep adding combinations from "path_fix" to "list")
+    //      if changed conditions don't allow to take the same transitions, or sufficent conditions can't be changed at Start,
+    //      consider transition UNACHIEVABLE and clear "path_fix"
+    // 2.3. if transition leads to termination or is unachievable (note error) repeat 2.
+    //
+    // what constitutes a state that doesn't termiante?
+    // all transitions are unachievable -> keep a list of "numer of unachievable transitions / state" 
+    // if that number = number of transitions, consider state a dead end
+    // each time you change length of "path", change this list accordingly
+    //
+    // each time there is a dead end note the entire path to it (Start -> s1 -> s2 -> dead_end)
+
+    // TODO: in each state see if there is a combination of conditions that result in a dead end
+
+    // TODO: if parsing returned separate states and conditions this might not be needed, but now
+    // states can also be considered conditions and the only other idents are "Start" and "Termination"
+
+pub fn tmp_name_validate_conditions(states: &States, idents: &Idents) -> Result<TODO, TODO> {
+    let n_conditions = idents.idents.len();
+
+    let starting_indexes = {
+        let mut starting_indexes = vec![];
+        for i in 0..states.states.len() {
+            if let State::Start{..} = &states.states[i] {
+                starting_indexes.push(i);
+            }
+        }
+        starting_indexes
+    };
+    assert!(starting_indexes.len() != 0);
+
+    let mut checked_list: Vec<Combination> = vec![];
+
+    's_states: for i in starting_indexes {
+        let mut idx = StateIndexer(i);
+        let mut path: Vec<Combination> = vec![];
+        let mut conditions = BitArray::new(n_conditions);
+        let mut maybe_set = BitArray::new(n_conditions);
+        let mut maybe_unset = BitArray::new(n_conditions);
+
+        let mut walk_back = false;
+        let mut already_checked = false;
+        let mut should_walk_back = false;
+        let mut transition_idx = 0;
+
+        'check: loop {
+            // println!("\n--------------- next iteration ---------------");
+            should_walk_back = false;
+            if already_checked {
+                // for p in &path {println!("{p:?}")}
+                todo!("next iteration after already checking");
+            }
+            if walk_back {
+                // should we pop or take the last?
+                // println!("path before popping:");
+                // for p in &path {println!("{p:?}")}
+                // println!("path after popping:");
+                match path.pop() {
+                    Some(combination) => {
+                        idx = combination.state;
+                        conditions = combination.conditions;
+                        maybe_set = combination.maybe_set;
+                        maybe_unset = combination.maybe_unset;
+                        transition_idx = combination.transition_idx + 1;
+                    },
+                    None => continue 's_states
+                }
+            }
+
+            // for p in &path {println!("{p:?}")}
+            // println!("current state idx: {:?}", idx.0);
+            // println!("transition_idx: {transition_idx}");
+
+            let (s_set, s_unset, s_maybe, s_maybe_set, s_maybe_unset, s_transitions) = {
+                match &states[idx] {
+                    State::Base{set, unset, maybe, maybe_set, maybe_unset, transitions, ..} |
+                        State::Start{set, unset, maybe, maybe_set, maybe_unset, transitions, ..} => {
+                            (set, unset, maybe, maybe_set, maybe_unset, transitions)
+                        }
+                    State::Termination{..} => {
+                        // todo!("got to termination state, now go back")
+                        // println!("TERMINATION");
+                        walk_back = true;
+                        continue 'check;
+                    }
+                }
+            };
+
+            // Step 1. and 2.
+            if !walk_back {
+                transition_idx = 0;
+                // println!("zeroed transition_idx");
+
+                // upadte conditions with what is set and possible changes with
+                // what can and cannot change
+                for cond in s_set {
+                    conditions.set_at(cond.0);
+                    maybe_set.unset_at(cond.0);
+                    maybe_unset.unset_at(cond.0);
+                }
+
+                for cond in s_unset {
+                    conditions.unset_at(cond.0);
+                    maybe_set.unset_at(cond.0);
+                    maybe_unset.unset_at(cond.0);
+                }
+
+                for cond in s_maybe {
+                    if conditions.at(cond.0) {
+                        maybe_unset.set_at(cond.0);
+                    } else {
+                        maybe_set.set_at(cond.0);
+                    }
+                }
+
+                for cond in s_maybe_set {
+                    if !conditions.at(cond.0) {
+                        maybe_set.set_at(cond.0);
+                    }
+                }
+
+                for cond in s_maybe_unset {
+                    if conditions.at(cond.0) {
+                        maybe_unset.set_at(cond.0);
+                    }
+                }
+                // TODO: also check requirements for that state
+
+                for c in &checked_list {
+                    if idx == c.state && conditions == c.conditions &&
+                        maybe_set == c.maybe_set && maybe_unset == c.maybe_unset
+                    {
+                        // println!("already checked");
+                        // already_checked = true;
+                        walk_back = true;
+                        continue 'check;
+                    }
+                }
+
+                // future TODO: handle the negative conditions / logical expressions
+                // TODO: make those two into one loop
+                let mut dead_end = true;
+                't: for (_, conds) in s_transitions {
+                    for cond in conds {
+                        if !conditions.at(cond.0) || maybe_unset.at(cond.0) {continue 't;}
+                    }
+                    dead_end = false;
+                }
+                if dead_end {
+                    todo!("report that the state can be a dead end and go back");
+                    // TODO: report what conditions need to be set for what transitions
+                }
+
+                let mut unachievable_transitions = vec![];
+                for (i, (_, conds)) in s_transitions.iter().enumerate() {
+                    for cond in conds {
+                        if !conditions.at(cond.0) && !maybe_set.at(cond.0) {
+                            unachievable_transitions.push(i);
+                        }
+                    }
+                }
+                if unachievable_transitions.len() > 0 {
+                    // TODO:
+                    // don't error, because there might be a loop that that makes a transition
+                    // possible, so instead note it in a variable and if at the end it is still
+                    // unachievable, only then report error
+                    /*
+                    match &states[idx] {
+                        State::Start{name, ..} | State::Base{name, ..} | State::Termination{name, ..} => {
+                            // eprint!("in state: {} ", idents.name_at(name.0));
+                            if unachievable_transitions.len() == 1 {
+                                // eprint!("there is an unachievable transition ");
+                            } else {
+                                // eprintln!("there are unachievable transitions to:");
+                            }
+                        }
+                    }
+                    for t in unachievable_transitions {
+                        match &states[s_transitions[t].0] {
+                            State::Start{name, ..} | State::Base{name, ..} | State::Termination{name, ..} => {
+                                // eprintln!("- {} (with index: {t})", idents.name_at(name.0));
+                            }
+                        }
+                    }
+                    // eprintln!("TODO: actually push it to some unachievable transitions for each state and at the end report what is the path to that state");
+                    // */
+                }
+            }
+
+            if (transition_idx < s_transitions.len()) && !should_walk_back {
+                let combination = Combination {
+                    state: idx,
+                    transition_idx,
+                    conditions: conditions.clone(),
+                    maybe_set: maybe_set.clone(),
+                    maybe_unset: maybe_unset.clone(),
+                };
+                path.push(combination.clone());
+                checked_list.push(combination);
+                idx = s_transitions[transition_idx].0;
+                walk_back = false;
+
+                // after pushing set the necessary conditions for exploring after transitioning
+                for cond in &s_transitions[transition_idx].1 {
+                    if !conditions.at(cond.0) && !maybe_set.at(cond.0) {
+                        // println!("doesn't mean conditions for transition");
+                        walk_back = true;
+                        continue;
+                    }
+                    if !conditions.at(cond.0) {
+                        assert!(maybe_set.at(cond.0), "if you got here you probably should be able to set those conditions");
+                        // conditions from maybe_set -> set
+                        conditions.set_at(cond.0);
+                        maybe_set.unset_at(cond.0);
+                        // if it has to be set, disallow considering it unset
+                        maybe_unset.unset_at(cond.0);
+                    }
+                }
+                continue 'check;
+            } else {
+                // println!("will walk back");
+                walk_back = true;
+            }
+        }
+    }
+
+    unimplemented!();
+}
+
+#[derive(Debug, Clone)]
+struct Combination {
+    state: StateIndexer,
+    transition_idx: usize,
+    // default conditions to get to this point
+    conditions: BitArray,
+    // all the conditions that could be different at this point
+    maybe_set: BitArray,
+    maybe_unset: BitArray,
+}
+
+impl Combination {
+    fn eq_for_checking_visited(&self, other: &Combination) -> bool {
+        self.state == other.state && self.conditions == other.conditions
+        && self.maybe_set == other.maybe_set && self.maybe_unset == other.maybe_unset
+    }
+}
+
+// TODO: dump states into a graphviz file also can do that with "fully filled conditions" -
+// - transition conditions take into consideration state requirements and if condition has to be
+// met for all outgoing transition it can be added as a requirement to the state
+// TODO: show all the dead ends, unachievable transitions, etc. on a graph
+
+#[derive(Debug, Clone, PartialEq)]
+struct BitArray {
+    len: usize,
+    bits: Vec<usize>
+}
+
+impl BitArray {
+    fn new(len: usize) -> BitArray {
+        let i: usize = len / usize::BITS as usize +
+            if len % usize::BITS as usize == 0 { 0 }
+            else { 1 };
+        BitArray { len, bits: vec![0; i] }
+    }
+
+    fn at(&self, i: usize) -> bool {
+        assert!(i < self.len, "index out of bounds");
+        let idx = i / usize::BITS as usize;
+        self.bits[idx] >> (i % usize::BITS as usize) & 0b1 != 0
+    }
+
+    fn set_at(&mut self, i: usize) {
+        assert!(i < self.len, "index out of bounds");
+        let idx = i / usize::BITS as usize;
+        self.bits[idx] |= 1 << (i % usize::BITS as usize);
+    }
+
+    fn unset_at(&mut self, i: usize) {
+        assert!(i < self.len, "index out of bounds");
+        let idx = i / usize::BITS as usize;
+        self.bits[idx] &= !(1 << (i % usize::BITS as usize));
+    }
+
+    fn flip(&mut self, i: usize) -> bool {
+        assert!(i < self.len, "index out of bounds");
+        let idx = i / usize::BITS as usize;
+        self.bits[idx] ^= 1 << (i % usize::BITS as usize);
+        self.bits[idx] >> (i % usize::BITS as usize) & 0b1 != 0
+    }
+
+    fn and(&mut self, other: &BitArray) {
+        assert!(self.len <= other.len, "len of other must be at least as much as len of self");
+        for i in 0..self.bits.len() {
+            self.bits[i] &= other.bits[i]
+        }
+    }
+
+    fn or(&mut self, other: &BitArray) {
+        assert!(self.len <= other.len, "len of other must be at least as much as len of self");
+        for i in 0..self.bits.len() {
+            self.bits[i] |= other.bits[i]
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        for i in 0..self.bits.len() {
+            if self.bits[i] > 0 {return false}
+        }
+        true
+    }
+    
+    fn zero_out(&mut self) {
+        for i in 0..self.bits.len() {
+            self.bits[i] = 0;
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IdentData {
+    idx: usize,
+    len: usize,
+}
+
+#[derive(PartialEq)]
+struct Ident<'a> {
+    slice: IdentData,
+    parent: &'a Idents
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Idents {
+    chars: Vec<u8>,
+    pub idents: Vec<IdentData>,
+}
+
+impl<'s> Idents {
+    fn new() -> Idents {
+        Idents {
+            chars: vec![],
+            idents: vec![],
+        }
+    }
+
+    fn at(&'s self, i: usize) -> Ident<'s> {
+        Ident {
+            slice: self.idents[i].clone(),
+            parent: &self
+        }
+    }
+
+    // push if not already in and return index of ident
+    fn add_if_not_in(&mut self, chars: &[u8]) -> usize {
+        'i: for i in 0..self.idents.len() {
+            let ident = &self.idents[i];
+            if ident.len != chars.len() {continue 'i}
+            for c in 0..chars.len() {
+                if chars[c] != self.chars[ident.idx + c] {continue 'i}
+            }
+            return i;
+        }
+
+        self.idents.push(IdentData{idx: self.chars.len(), len: chars.len()});
+        for &c in chars {
+            self.chars.push(c);
+        }
+        return self.idents.len()-1;
+    }
+
+    pub fn name_at(&self, i: usize) -> &str {
+        let idx = self.idents[i].idx;
+        let len = self.idents[i].len;
+        match std::str::from_utf8(&self.chars[idx..idx+len]) {
+            Ok(s) => s,
+            Err(_) => panic!("invalid ident {i}, at index: {idx} with length: {len}"),
+        }
+    }
+}
+
+impl<'s> Ident<'s> {
+    fn chars(&self) -> &'s [u8] {
+        &self.parent.chars[self.slice.idx .. self.slice.idx + self.slice.len]
+    }
 }
 
 pub mod parser {
@@ -168,73 +613,6 @@ pub mod parser {
         Comma,
         Colon,
         AngleC,
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    struct IdentData {
-        idx: usize,
-        len: usize,
-    }
-
-    #[derive(PartialEq)]
-    struct Ident<'a> {
-        slice: IdentData,
-        parent: &'a Idents
-    }
-
-    #[derive(Debug, PartialEq)]
-    pub struct Idents {
-        chars: Vec<u8>,
-        idents: Vec<IdentData>,
-    }
-
-    impl<'s> Idents {
-        fn new() -> Idents {
-            Idents {
-                chars: vec![],
-                idents: vec![],
-            }
-        }
-
-        fn at(&'s self, i: usize) -> Ident<'s> {
-            Ident {
-                slice: self.idents[i].clone(),
-                parent: &self
-            }
-        }
-
-        // push if not already in and return index of ident
-        fn add_if_not_in(&mut self, chars: &[u8]) -> usize {
-            'i: for i in 0..self.idents.len() {
-                let ident = &self.idents[i];
-                if ident.len != chars.len() {continue 'i}
-                for c in 0..chars.len() {
-                    if chars[c] != self.chars[ident.idx + c] {continue 'i}
-                }
-                return i;
-            }
-
-            self.idents.push(IdentData{idx: self.chars.len(), len: chars.len()});
-            for &c in chars {
-                self.chars.push(c);
-            }
-            return self.idents.len()-1;
-        }
-
-        fn name_at(&self, i: usize) -> &str {
-            let idx = self.idents[i].idx;
-            let len = self.idents[i].len;
-            match std::str::from_utf8(&self.chars[idx..idx+len]) {
-                Ok(s) => s,
-                Err(_) => panic!("invalid ident {i}, at index: {idx} with length: {len}"),
-            }
-        }
-    }
-
-    impl<'s> Ident<'s> {
-        fn chars(&self) -> &'s [u8] {
-            &self.parent.chars[self.slice.idx .. self.slice.idx + self.slice.len]
-        }
     }
 
     fn tokenize(input: &str) -> Result<(Vec<Token>, Idents), TODO> {
@@ -590,4 +968,4 @@ pub mod parser {
     }
 }
 
-// TODO: add something (;) to denote that state has no interions - useful for termination
+// TODO: add something (;) to denote that state has no interior - useful for termination
