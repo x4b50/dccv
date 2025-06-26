@@ -315,6 +315,89 @@ pub fn tmp_name_validate_conditions(states: &States, idents: &Idents) -> Result<
     unimplemented!();
 }
 
+pub fn generate_graph(states: &States, idents: &Idents, file_name: &str) -> Result<TODO, TODO> {
+    use std::fs;
+    use std::io::Write;
+
+    let mut f = match fs::File::create(file_name) {
+        Ok(f) => f,
+        Err(_) => {
+            eprintln!("couldn't create file {file_name}");
+            return Err(TODO)
+        }
+    };
+    f.write(b"digraph {\n\tnode [shape=plaintext]").unwrap();
+
+    enum StateType {
+        Start, Base, Termination
+    }
+
+    for i in 0..states.states.len() {
+        f.write(format!("\n\tstate_{i} [label=<<TABLE BORDER='0' CELLBORDER='1' CELLSPACING='0' CELLPADDING='4' COLOR='").as_bytes()).unwrap();
+        let (t, name, requirements, set, unset, maybe, maybe_set, maybe_unset, transitions) = match &states.states[i] {
+            State::Start{name, set, unset, maybe, maybe_set, maybe_unset, transitions} => {
+                (StateType::Start, name, &vec![], set, unset, maybe, maybe_set, maybe_unset, transitions)
+            }
+            State::Base{name, requirements, set, unset, maybe, maybe_set, maybe_unset, transitions} => {
+                (StateType::Base, name, requirements, set, unset, maybe, maybe_set, maybe_unset, transitions)
+            }
+            State::Termination{name, requirements} => {
+                (StateType::Termination, name, requirements, &vec![], &vec![], &vec![], &vec![], &vec![], &vec![])
+            }
+        };
+
+        f.write(match t {
+            StateType::Start => b"#00ee80'>\n",
+            StateType::Base => b"#000000'>\n",
+            StateType::Termination => b"#0080ee'>\n",
+        }).unwrap();
+        f.write(format!("\t\t<TR><TD COLSPAN='2'><B>{}</B></TD></TR>\n", idents.name_at(name.0)).as_bytes()).unwrap();
+
+        for (n, row) in [requirements, set, unset, maybe, maybe_set, maybe_unset].iter().enumerate() {
+            if row.len() > 0 {
+                f.write(format!("\t\t<TR><TD><B>{}:</B></TD>\n\t\t\t<TD>", match n {
+                    0 => "requirements",
+                    1 => "set",
+                    2 => "unset",
+                    3 => "maybe",
+                    4 => "maybe set",
+                    5 => "maybe unset",
+                    _ => panic!("too many iterations")
+                }).as_bytes()).unwrap();
+
+                f.write(format!("{}", idents.name_at(row[0].0)).as_bytes()).unwrap();
+                for r in 1..row.len() {
+                    f.write(format!(", {}", idents.name_at(row[r].0)).as_bytes()).unwrap();
+                }
+                f.write(b"</TD>\n\t\t</TR>\n").unwrap();
+            }
+        }
+        f.write(b"\t\t</TABLE>>];\n\n").unwrap();
+
+        for (tr, conds) in transitions {
+            f.write(format!("\tstate_{i} -> state_{}", tr.0).as_bytes()).unwrap();
+            if conds.len() > 0 {
+                f.write(b"[label=<<TABLE BORDER='0' CELLBORDER='1'>\n").unwrap();
+                for c in conds {
+                    f.write(format!("\t\t<TR><TD>{}</TD></TR>\n", idents.name_at(c.0)).as_bytes()).unwrap();
+                }
+                f.write(b"\t</TABLE>>];").unwrap();
+            }
+            f.write(b"\n").unwrap();
+        }
+    }
+
+    f.write(b"}").unwrap();
+
+    std::process::Command::new("dot")
+        .args([file_name, "-Tsvg", "-o",
+            std::path::Path::new(file_name).with_extension("svg").to_str().unwrap()])
+        .status()
+        .expect("failed to execute dot, try installing graphviz");
+
+    Ok(TODO)
+}
+
 #[derive(Debug, Clone)]
 struct Combination {
     state: StateIndexer,

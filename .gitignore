@@ -1,3 +1,5 @@
 /target
 tests/dev_testing.rs
 tests/dev_testing.input
+tests/dev_testing.dot
+tests/dev_testing.svg
