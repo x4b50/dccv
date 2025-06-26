@@ -390,8 +390,8 @@ pub fn generate_graph(states: &States, idents: &Idents, file_name: &str) -> Resu
     f.write(b"}").unwrap();
 
     std::process::Command::new("dot")
-        .args([file_name, "-Tsvg", "-o",
-            std::path::Path::new(file_name).with_extension("svg").to_str().unwrap()])
+        .args([file_name, "-Tpng", "-o",
+            std::path::Path::new(file_name).with_extension("png").to_str().unwrap()])
         .status()
         .expect("failed to execute dot, try installing graphviz");
 
